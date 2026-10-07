@@ -73,7 +73,11 @@ Open the repository's **Actions → Campus Copilot → Run workflow** form:
 
 This is an on-demand workflow, not a live Telegram chat bot. You start it from GitHub Actions; GitHub runs Hermes and Telegram delivers the answer. It needs the Telegram secrets and may take longer on the first run while the model is downloaded.
 
-### 6. Test and monitor
+### 6. Test Telegram notifications
+
+Open **Actions → Campus Copilot → Run workflow**, select `telegram-test`, then start the run. It sends one short test message without starting Ollama. If the action fails, confirm that both Telegram repository secrets are set and that you started a chat with your bot.
+
+### 7. Test and monitor
 
 In the repository, open **Actions → Campus Copilot → Run workflow**, select `daily` or `reminder`, and start the run. Inspect its logs in the Actions tab. Do not add commands that print environment variables or secret values.
 

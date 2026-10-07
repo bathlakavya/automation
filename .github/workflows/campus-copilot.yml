@@ -14,6 +14,7 @@ on:
           - daily
           - reminder
           - assist
+          - telegram-test
       mode:
         description: For assist, choose coding help or study help
         required: true
@@ -147,3 +148,31 @@ jobs:
             exit 1
           fi
           python -m campus_copilot assist "$ASSIST_MODE" "$ASSIST_REQUEST"
+
+      - name: Send Telegram test notification
+        if: github.event_name == 'workflow_dispatch' && inputs.task == 'telegram-test'
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          import requests
+
+          token = os.environ.get("TELEGRAM_BOT_TOKEN")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+          if not token or not chat_id:
+              sys.exit("Configure TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in repository Actions secrets.")
+
+          try:
+              response = requests.post(
+                  f"https://api.telegram.org/bot{token}/sendMessage",
+                  json={"chat_id": chat_id, "text": "Campus Copilot test: Telegram notifications are connected."},
+                  timeout=20,
+              )
+              response.raise_for_status()
+              if not response.json().get("ok"):
+                  sys.exit("Telegram did not accept the test message; check the bot and chat ID.")
+          except requests.RequestException as exc:
+              sys.exit(f"Telegram test failed ({type(exc).__name__}); check the bot token and network.")
+
+          print("Telegram test notification sent.")
+          PY
