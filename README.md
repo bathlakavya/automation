@@ -5,13 +5,14 @@ Campus Copilot uses scheduled GitHub Actions as its backend, runs the configured
 ## What it does
 
 - At **07:30 Asia/Kolkata**, checks Google Classroom (or the configured IMAP fallback), scores new job listings, and sends the daily brief.
-- At **18:00 Asia/Kolkata**, checks for upcoming deadlines and sends a reminder if any are due soon.
+- Every **2 hours**, checks Google Classroom for overdue assignments or deadlines within 24 hours. Reminder messages label items **OVERDUE**, **URGENT** (within 3 hours), **HIGH** (within 6 hours), or **DUE SOON** (within 24 hours).
+- On demand, a manual workflow request runs Hermes coding or study help and sends the response to Telegram.
 - Uses **Hermes 3 3B through Ollama** on a temporary GitHub-hosted runner. The model is cached between runs when GitHub's cache is available.
 - Uses **Telegram** for phone and desktop notifications. Telegram delivers messages; GitHub Actions runs the automation.
 - Makes no Claude or Anthropic API calls.
 - Caches the SQLite memory between workflow runs to reduce repeated job alerts and retain job feedback. GitHub cache retention and availability apply.
 
-The scheduled runner starts only for a workflow run; this is not a continuously running server. GitHub may delay scheduled workflows, and GitHub plan usage, repository activity, runner availability, and cache limits apply. Scheduled workflows may be disabled by GitHub after prolonged repository inactivity. The first model download can be slow.
+The scheduled runner starts only for a workflow run; this is not a continuously running server. GitHub may delay scheduled workflows, and GitHub plan usage, repository activity, runner availability, and cache limits apply. Scheduled workflows may be disabled by GitHub after prolonged repository inactivity. Deadline checks do not start Ollama, avoiding model startup on those runs. The first daily or coding/study run may take longer while Hermes downloads.
 
 ## Set up GitHub Actions
 
@@ -61,14 +62,25 @@ Telegram is enough for notifications on multiple devices. To also use other exis
 
 Leave unused secrets unset. GitHub Actions injects configured secrets as environment variables at runtime.
 
-### 5. Test and monitor
+### 5. Ask for coding or study help when needed
+
+Open the repository's **Actions → Campus Copilot → Run workflow** form:
+
+1. Select `assist` as the task.
+2. Choose `coding` or `study`.
+3. Enter your question/request.
+4. Start the workflow and read Hermes's response in Telegram.
+
+This is an on-demand workflow, not a live Telegram chat bot. You start it from GitHub Actions; GitHub runs Hermes and Telegram delivers the answer. It needs the Telegram secrets and may take longer on the first run while the model is downloaded.
+
+### 6. Test and monitor
 
 In the repository, open **Actions → Campus Copilot → Run workflow**, select `daily` or `reminder`, and start the run. Inspect its logs in the Actions tab. Do not add commands that print environment variables or secret values.
 
-Scheduled jobs are:
+Scheduled jobs use UTC:
 
 - `0 2 * * *` UTC = 07:30 Asia/Kolkata daily brief
-- `30 12 * * *` UTC = 18:00 Asia/Kolkata deadline reminder
+- `30 0-22/2 * * *` UTC = deadline check every two hours (06:00, 08:00, ..., 04:00 Asia/Kolkata)
 
 To change these times, edit the cron expressions in the workflow. GitHub Actions cron uses UTC.
 
@@ -80,7 +92,7 @@ To change these times, edit the cron expressions in the workflow. GitHub Actions
 4. Copy `.env.example` to `.env`. Local Ollama defaults to `http://localhost:11434`.
 5. Configure `config.yaml`, then try `python -m campus_copilot run`.
 
-Useful commands:
+Useful local commands:
 
 ```sh
 python -m campus_copilot run

@@ -44,6 +44,9 @@ def main(argv=None):
     a = sub.add_parser("ask", help="coding / build help (local Ollama model)"); a.add_argument("question")
     s = sub.add_parser("study", help="notes | quiz | hints | plan")
     s.add_argument("mode", choices=["notes", "quiz", "hints", "plan"]); s.add_argument("text")
+    assist = sub.add_parser("assist", help="answer a coding or study request and send it to configured channels")
+    assist.add_argument("mode", choices=["coding", "study"])
+    assist.add_argument("request")
     pa = sub.add_parser("pa", help="personal assistant: 'remind me to ... Friday 6pm'"); pa.add_argument("text")
     f = sub.add_parser("feedback", help="train job ranking"); f.add_argument("job_id"); f.add_argument("vote", choices=["up", "down"])
     args = p.parse_args(argv)
@@ -64,6 +67,11 @@ def main(argv=None):
         print(llm.hermes(llm.load_prompt("coder"), args.question))
     elif args.cmd == "study":
         print(llm.hermes(llm.load_prompt("study"), f"MODE: {args.mode}\n\n{args.text}"))
+    elif args.cmd == "assist":
+        prompt = "coder" if args.mode == "coding" else "study"
+        answer = llm.hermes(llm.load_prompt(prompt), args.request)
+        results = notify.broadcast("Campus Copilot — " + args.mode.title() + " help", answer)
+        print(json.dumps(results, indent=2))
     elif args.cmd == "pa":
         print(cmd_pa(cfg, args.text))
     elif args.cmd == "feedback":

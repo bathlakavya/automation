@@ -116,7 +116,7 @@ def run_daily(cfg):
 
 
 def remind(cfg):
-    """Cheap evening nudge: no LLM calls, just deadlines inside 24h."""
+    """Send an urgency-ranked reminder for overdue or next-24-hour deadlines."""
     try:
         data = get_classroom(cfg)
     except Exception as e:  # noqa: BLE001
@@ -131,6 +131,20 @@ def remind(cfg):
                 due_soon.append((d, a))
     if not due_soon:
         return None
-    lines = [f"⏰ {a['title']} ({a['course']}) due {d.strftime('%a %d %b, %I:%M %p')}\n{a['link']}"
-             for d, a in sorted(due_soon, key=lambda x: x[0])]
-    return notify.broadcast("Due in the next 24h", "\n\n".join(lines))
+    lines = []
+    for due, assignment in sorted(due_soon, key=lambda item: item[0]):
+        remaining = due - now
+        if remaining.total_seconds() <= 0:
+            urgency = "🔴 OVERDUE"
+        elif remaining <= timedelta(hours=3):
+            urgency = "🔴 URGENT"
+        elif remaining <= timedelta(hours=6):
+            urgency = "🟠 HIGH"
+        else:
+            urgency = "🟡 DUE SOON"
+        line = (f"{urgency} — {assignment['title']} ({assignment['course']})\n"
+                f"Due: {due.strftime('%a %d %b, %I:%M %p')}")
+        if assignment["link"]:
+            line += f"\n{assignment['link']}"
+        lines.append(line)
+    return notify.broadcast("Deadline check — act on the highest urgency first", "\n\n".join(lines))

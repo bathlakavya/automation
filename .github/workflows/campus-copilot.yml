@@ -2,8 +2,8 @@ name: Campus Copilot
 
 on:
   schedule:
-    - cron: "0 2 * * *"  # 07:30 Asia/Kolkata
-    - cron: "30 12 * * *" # 18:00 Asia/Kolkata
+    - cron: "0 2 * * *"    # 07:30 Asia/Kolkata daily brief
+    - cron: "30 0-22/2 * * *" # Every 2 hours, 06:00 through 04:00 Asia/Kolkata
   workflow_dispatch:
     inputs:
       task:
@@ -13,6 +13,19 @@ on:
         options:
           - daily
           - reminder
+          - assist
+      mode:
+        description: For assist, choose coding help or study help
+        required: true
+        default: coding
+        type: choice
+        options:
+          - coding
+          - study
+      request:
+        description: Ask Hermes a coding or study question (assist task only)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -56,6 +69,7 @@ jobs:
           python-version: "3.11"
 
       - name: Cache Hermes model
+        if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist'))
         uses: actions/cache@v4
         with:
           path: .ollama/models
@@ -70,6 +84,7 @@ jobs:
             copilot-data-
 
       - name: Install and start Ollama
+        if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist'))
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
           sudo systemctl stop ollama || true
@@ -87,6 +102,7 @@ jobs:
           fi
 
       - name: Download Hermes model if not cached
+        if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist'))
         run: |
           if ! ollama show "$HERMES_MODEL" >/dev/null 2>&1; then
             ollama pull "$HERMES_MODEL"
@@ -117,5 +133,17 @@ jobs:
         run: python -m campus_copilot run
 
       - name: Run deadline reminder
-        if: (github.event_name == 'schedule' && github.event.schedule == '30 12 * * *') || (github.event_name == 'workflow_dispatch' && inputs.task == 'reminder')
+        if: (github.event_name == 'schedule' && github.event.schedule == '30 0-22/2 * * *') || (github.event_name == 'workflow_dispatch' && inputs.task == 'reminder')
         run: python -m campus_copilot remind
+
+      - name: Answer coding or study request
+        if: github.event_name == 'workflow_dispatch' && inputs.task == 'assist'
+        env:
+          ASSIST_MODE: ${{ inputs.mode }}
+          ASSIST_REQUEST: ${{ inputs.request }}
+        run: |
+          if [ -z "$ASSIST_REQUEST" ]; then
+            echo "Enter a question in the request field."
+            exit 1
+          fi
+          python -m campus_copilot assist "$ASSIST_MODE" "$ASSIST_REQUEST"
