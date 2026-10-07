@@ -1,0 +1,29 @@
+timezone: Asia/Kolkata
+
+profile:                      # EDIT: this is what jobs get scored against
+  degree: "MCA"
+  graduation_year: 2027       # EDIT
+  skills: ["Python", "SQL", "Java", "JavaScript", "Git"]   # EDIT
+  interests: ["backend", "AI/ML", "full-stack"]
+  preferred_locations: ["Bengaluru", "Delhi NCR", "Remote"]
+  targets: ["internship", "full-time"]
+  min_stipend_or_ctc_note: ""  # optional free text
+
+jobs:
+  max_new_per_run: 10          # limit local-model scoring time on scheduled runners
+  top_n: 10
+  title_include: ["intern", "trainee", "graduate", "fresher", "sde", "software", "backend",
+                  "full stack", "fullstack", "developer", "engineer", "ml", "ai", "data"]
+  title_exclude: ["senior", "staff", "principal", "lead", "manager", "director", "head of", "vp"]
+  sources:
+    # Public job-board APIs. Verify each board token in your browser first
+    # (jobs.lever.co/<token> or boards.greenhouse.io/<token>); 404s are logged and skipped.
+    - {type: remotive,   search: "python"}
+    - {type: remotive,   search: "intern"}
+    - {type: greenhouse, board: "postman", company: "Postman"}
+    - {type: lever,      board: "cred",    company: "CRED"}
+    - {type: lever,      board: "groww",   company: "Groww"}
+
+classroom:
+  lookback_days: 7            # keep overdue-but-unsubmitted items this long
+  calendar_horizon_days: 14   # create calendar events for deadlines inside this window
