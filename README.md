@@ -5,16 +5,17 @@ Campus Copilot uses a Telegram webhook hosted on Render for direct text conversa
 ## What it does
 
 - Keeps unsolicited daily job digests off; run a daily digest manually only when you want it.
-- Telegram messages reach the Render webhook directly. It can acknowledge and save a text reminder without you opening GitHub Actions.
+- Telegram messages reach the Render webhook directly. It can acknowledge and save a text reminder or start supported Hermes tasks without you opening GitHub Actions.
+- Telegram tasks can create Google Calendar events, save Notion notes, and answer coding/study questions; Hermes sends results back to Telegram.
 - Every **5 minutes**, GitHub Actions checks Supabase for due personal reminders and sends a compact digest only for new actionable Classroom emails (assignments, due dates, quizzes, exams, submissions, and similar items).
 - Every **2 hours**, checks Google Classroom for key deadline milestones: within 6 hours, within 1 hour, and overdue. It sends each milestone once per assignment and does not repeat the same alert every run.
-- On demand, a manual workflow request runs Hermes coding or study help and sends the response to Telegram.
+- On-demand Telegram or manual workflow requests run Hermes coding or study help and send the response to Telegram.
 - Uses **Hermes 3 3B through Ollama** on a temporary GitHub-hosted runner. The model is cached between runs when GitHub's cache is available.
 - Uses **Telegram** for phone and desktop notifications. Telegram delivers messages; GitHub Actions runs the automation.
 - Makes no Claude or Anthropic API calls.
 - Caches the SQLite memory between workflow runs to reduce repeated job alerts and retain job feedback. GitHub cache retention and availability apply.
 
-The Render service uses its free plan, which can sleep when idle. Telegram may take longer to receive an acknowledgement while the service wakes. Due-time reminders are checked by GitHub Actions about every 5 minutes, and scheduled runs may be delayed, so delivery is not guaranteed at the exact requested minute. GitHub may disable scheduled workflows after prolonged repository inactivity; runner availability and usage limits also apply. Personal reminders, deadline-alert deduplication, and email-deduplication state are stored in Supabase. The first on-demand coding/study run may take longer while Hermes downloads.
+The Render service uses its free plan, which can sleep when idle. Telegram may take longer to receive an acknowledgement while the service wakes. Due-time reminders are checked by GitHub Actions about every 5 minutes, and scheduled runs may be delayed, so delivery is not guaranteed at the exact requested minute. GitHub may disable scheduled workflows after prolonged repository inactivity; runner availability and usage limits also apply. Personal reminders, deadline-alert deduplication, and email-deduplication state are stored in Supabase. The first on-demand task may take longer while Hermes downloads. Telegram-triggered tasks run on temporary GitHub-hosted runners, not continuously; Hermes is not a 24/7 process and may take several minutes to return a result.
 
 ## Set up GitHub Actions
 
@@ -43,6 +44,7 @@ Keep the bot token private. You will enter `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CH
 2. Connect the GitHub repository `bathlakavya/automation` and select its `main` branch. Render will read [`render.yaml`](render.yaml).
 3. When prompted, provide `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`. Render generates `TELEGRAM_WEBHOOK_SECRET`.
 4. Deploy the Blueprint. Wait until Render reports the service as healthy; its health check registers the Telegram webhook automatically.
+5. Create a GitHub fine-grained personal access token restricted to the `automation` repository with **Actions: Read and write** permission. Add it to the Render service as `GITHUB_ACTIONS_TOKEN`, then redeploy. The bot uses this token only to start the repository's workflow; keep it secret.
 
 The free Render service may sleep when idle, so the first reply after sleep can be delayed. Render's local filesystem is temporary; reminders live in Supabase so they survive service restarts.
 
@@ -81,18 +83,20 @@ After Render deploys successfully, send your bot a text message like:
 Remind me tomorrow at 5:30 PM to call Maya
 ```
 
-The Render webhook acknowledges the message and stores the one-time reminder in Supabase. GitHub Actions checks about every 15 minutes and sends a Telegram notification when it is due; GitHub can delay that check. Times use `Asia/Kolkata` by default; if you omit the time, it uses 09:00. Send `/list` to see pending reminders, `/cancel ID` to cancel one, or `/help` for instructions. Only text reminders are supported. Do not send secrets, passwords, or private credentials to the bot.
+The Render webhook acknowledges the message and stores the one-time reminder in Supabase. GitHub Actions checks about every 5 minutes and sends a Telegram notification when it is due; GitHub can delay that check. Times use `Asia/Kolkata` by default; if you omit the time, it uses 09:00. Send `/list` to see pending reminders, `/cancel ID` to cancel one, or `/help` for instructions. Only text reminders are supported. Do not send secrets, passwords, or private credentials to the bot.
 
-### 9. Ask for coding or study help when needed
+### 9. Send tasks from Telegram
 
-Open the repository's **Actions → Campus Copilot → Run workflow** form:
+After adding `GITHUB_ACTIONS_TOKEN` to Render, send supported requests directly to the bot:
 
-1. Select `assist` as the task.
-2. Choose `coding` or `study`.
-3. Enter your question/request.
-4. Start the workflow and read Hermes's response in Telegram.
+```text
+/do Save a note: topics to revise are SQL joins and normalization
+/do Add a calendar event tomorrow at 5 PM called DBMS revision
+/ask Explain SQL joins with a simple example
+/study Make me a short quiz about normalization
+```
 
-This is an on-demand workflow, not a live Telegram chat bot. You start it from GitHub Actions; GitHub runs Hermes and Telegram delivers the answer. It needs the Telegram secrets and may take longer on the first run while the model is downloaded.
+`/do` can create Google Calendar events or save Notion notes. These require the corresponding GitHub Actions secrets (`GOOGLE_CREDENTIALS_JSON` and `GOOGLE_TOKEN_JSON`, or `NOTION_TOKEN` and `NOTION_DATABASE_ID`). `/ask` and `/study` send Hermes coding or study answers to Telegram. You can also send a natural-language calendar or note request without `/do`. This does not control your device or perform arbitrary actions outside these integrations. GitHub Actions runs each task on demand, so it may take several minutes, especially before the model cache is warm; Hermes is not permanently running.
 
 ### 10. Test Telegram notifications
 
@@ -104,7 +108,7 @@ The reminder and email checks run automatically. Use **Actions → Campus Copilo
 
 Scheduled jobs use UTC:
 
-- `*/15 * * * *` UTC = due personal reminders and Classroom email check (about every 15 minutes)
+- `*/5 * * * *` UTC = due personal reminders and Classroom email check (about every 5 minutes)
 - `30 0-22/2 * * *` UTC = important assignment deadline milestone check every two hours (06:00, 08:00, ..., 04:00 Asia/Kolkata)
 
 To change these times, edit the cron expressions in the workflow. GitHub Actions cron uses UTC.

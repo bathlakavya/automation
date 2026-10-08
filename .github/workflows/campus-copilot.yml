@@ -15,6 +15,7 @@ on:
           - reminder
           - scheduled-tick
           - assist
+          - telegram-pa
           - telegram-test
       mode:
         description: For assist, choose coding help or study help
@@ -25,7 +26,7 @@ on:
           - coding
           - study
       request:
-        description: Ask Hermes a coding or study question (assist task only)
+        description: Request text for Hermes or the Telegram task assistant
         required: false
         type: string
 
@@ -33,7 +34,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: campus-copilot
+  group: ${{ github.event_name == 'schedule' && 'campus-copilot-scheduled' || format('campus-copilot-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -73,7 +74,7 @@ jobs:
           python-version: "3.11"
 
       - name: Cache Hermes model
-        if: github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist')
+        if: github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist' || inputs.task == 'telegram-pa')
         uses: actions/cache@v4
         with:
           path: .ollama/models
@@ -88,7 +89,7 @@ jobs:
             copilot-data-
 
       - name: Install and start Ollama
-        if: github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist')
+        if: github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist' || inputs.task == 'telegram-pa')
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
           sudo systemctl stop ollama || true
@@ -106,7 +107,7 @@ jobs:
           fi
 
       - name: Download Hermes model if not cached
-        if: github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist')
+        if: github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist' || inputs.task == 'telegram-pa')
         run: |
           if ! ollama show "$HERMES_MODEL" >/dev/null 2>&1; then
             ollama pull "$HERMES_MODEL"
@@ -155,6 +156,39 @@ jobs:
             exit 1
           fi
           python -m campus_copilot assist "$ASSIST_MODE" "$ASSIST_REQUEST"
+
+      - name: Execute Telegram calendar or note task
+        if: github.event_name == 'workflow_dispatch' && inputs.task == 'telegram-pa'
+        env:
+          PA_REQUEST: ${{ inputs.request }}
+        run: |
+          if [ -z "$PA_REQUEST" ]; then
+            echo "Enter a task request."
+            exit 1
+          fi
+          python -m campus_copilot pa "$PA_REQUEST"
+
+      - name: Report task failure to Telegram
+        if: failure() && github.event_name == 'workflow_dispatch' && (inputs.task == 'assist' || inputs.task == 'telegram-pa')
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from urllib.request import Request, urlopen
+
+          token = os.environ["TELEGRAM_BOT_TOKEN"]
+          chat_id = os.environ["TELEGRAM_CHAT_ID"]
+          text = "I couldn’t complete that task. Check the GitHub Actions run for details."
+          request = Request(
+              f"https://api.telegram.org/bot{token}/sendMessage",
+              data=json.dumps({"chat_id": chat_id, "text": text}).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urlopen(request, timeout=20) as response:
+              if not json.loads(response.read()).get("ok"):
+                  raise SystemExit("Telegram rejected the task failure notification.")
+          PY
 
       - name: Send Telegram test notification
         if: github.event_name == 'workflow_dispatch' && inputs.task == 'telegram-test'

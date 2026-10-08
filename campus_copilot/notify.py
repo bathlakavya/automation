@@ -73,6 +73,41 @@ def telegram_set_webhook(webhook_url, secret_token):
     return True
 
 
+def github_dispatch(task, request_text, mode="coding"):
+    """Start a bounded Campus Copilot workflow task from the Telegram webhook."""
+    token = os.getenv("GITHUB_ACTIONS_TOKEN")
+    repository = os.getenv("GITHUB_REPOSITORY", "bathlakavya/automation")
+    if not token:
+        raise RuntimeError("Telegram task execution requires GITHUB_ACTIONS_TOKEN.")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise RuntimeError("GITHUB_REPOSITORY must use owner/repository format.")
+    if task not in {"telegram-pa", "assist"}:
+        raise RuntimeError("Unsupported Telegram task.")
+    if mode not in {"coding", "study"}:
+        raise RuntimeError("Unsupported assistant mode.")
+    inputs = {"task": task, "request": request_text, "mode": mode}
+    try:
+        response = requests.post(
+            f"https://api.github.com/repos/{repository}/actions/workflows/"
+            "campus-copilot.yml/dispatches",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            json={"ref": "main", "inputs": inputs},
+            timeout=20,
+        )
+        if response.status_code != 204:
+            raise RuntimeError(
+                f"GitHub rejected the task request (HTTP {response.status_code}); "
+                "check the Render GitHub Actions token and repository settings.")
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            f"Could not start the task on GitHub ({type(exc).__name__}).") from None
+    return True
+
+
 def email(title, body):
     user, pwd, to = os.getenv("SMTP_USER"), os.getenv("SMTP_PASS"), os.getenv("EMAIL_TO")
     if not (user and pwd and to):

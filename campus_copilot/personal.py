@@ -68,7 +68,8 @@ def handle_message(text, update_id, timezone, now=None):
 
     if text.lower() in ("/start", "/help", "help"):
         return ("Send a reminder like: “Remind me tomorrow at 5:30 PM to call Maya”. "
-                "Use /list to see pending reminders or /cancel ID to cancel one. "
+                "Use /list or /cancel ID for reminders, /do to create a Calendar event "
+                "or Notion note, and /ask or /study for Hermes help. "
                 "If you omit the time, I’ll use 9:00 AM.")
 
     if text.lower() in ("/list", "list reminders", "show reminders"):

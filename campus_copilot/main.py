@@ -17,18 +17,31 @@ def load_cfg():
 
 
 def cmd_pa(cfg, text):
-    """Personal-assistant: natural language -> calendar event or Notion note."""
+    """Execute a supported calendar or Notion action from a natural-language request."""
     now = datetime.now(ZoneInfo(cfg["timezone"])).isoformat()
-    task = (f'TASK: Convert the request to JSON. Now={now}. Schema: {{"action":"calendar"|"note",'
+    task = (f'TASK: Convert the request to JSON. Now={now}. Schema: {{"action":"calendar"|"note"|"unsupported",'
             '"title":str,"start_iso":str|null,"duration_min":int,"body":str}. '
+            "If the request is not clearly asking to create a calendar event or save a note, "
+            'return {"action":"unsupported","title":"","start_iso":null,"duration_min":30,"body":""}. '
             "start_iso must be ISO-8601 with +05:30 offset.\nREQUEST: " + text)
     res = llm.parse_json(llm.execute(task, json_mode=True))
+    if not isinstance(res, dict) or res.get("action") not in {"calendar", "note", "unsupported"}:
+        raise RuntimeError("Hermes returned an invalid task classification.")
+    if res["action"] == "unsupported":
+        return ("I can currently create Google Calendar events, save Notion notes, "
+                "manage reminders, or answer coding/study questions with /ask or /study.")
+    title = res.get("title")
+    if not isinstance(title, str) or not title.strip():
+        raise RuntimeError("Hermes did not provide a usable task title.")
     if res["action"] == "calendar" and res.get("start_iso"):
-        notify.calendar_event(res["title"], notify.parse_dt(res["start_iso"]),
+        notify.calendar_event(title, notify.parse_dt(res["start_iso"]),
                               res.get("duration_min", 30), res.get("body", ""), cfg["timezone"])
-        return f"Calendar event created: {res['title']} at {res['start_iso']}"
-    notify.notion(res["title"], res.get("body") or text)
-    return f"Note saved: {res['title']}"
+        return f"Calendar event created: {title} at {res['start_iso']}"
+    if res["action"] == "calendar":
+        raise RuntimeError("The Calendar request did not include a valid start time.")
+    if not notify.notion(title, res.get("body") or text):
+        return "I can save notes after Notion is configured in GitHub Actions."
+    return f"Note saved: {title}"
 
 
 def main(argv=None):
@@ -74,9 +87,13 @@ def main(argv=None):
         prompt = "coder" if args.mode == "coding" else "study"
         answer = llm.hermes(llm.load_prompt(prompt), args.request)
         results = notify.broadcast("Campus Copilot — " + args.mode.title() + " help", answer)
+        if results.get("telegram") != "sent":
+            raise RuntimeError("Hermes finished, but Telegram could not receive the answer.")
         print(json.dumps(results, indent=2))
     elif args.cmd == "pa":
-        print(cmd_pa(cfg, args.text))
+        result = cmd_pa(cfg, args.text)
+        notify.telegram_reply(os.environ["TELEGRAM_CHAT_ID"], result)
+        print(result)
     elif args.cmd == "feedback":
         key = store.find_job_key(args.job_id)
         if not key:

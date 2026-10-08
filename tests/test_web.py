@@ -34,7 +34,7 @@ class TelegramWebhookTests(unittest.TestCase):
     @patch("campus_copilot.web.notify.telegram_reply")
     @patch("campus_copilot.web.personal.handle_message", return_value="Saved reminder.")
     @patch("campus_copilot.web._ensure_webhook")
-    def test_valid_text_update_gets_immediate_reply(self, _setup, handle, reply):
+    def test_reminder_gets_immediate_reply(self, _setup, handle, reply):
         response = self.client.post(
             "/telegram/webhook",
             headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
@@ -50,6 +50,77 @@ class TelegramWebhookTests(unittest.TestCase):
         self.assertEqual(handle.call_args.args[2].key, "Asia/Kolkata")
         self.assertEqual(handle.call_args.kwargs["now"].tzinfo.key, "Asia/Kolkata")
         reply.assert_called_once_with("42", "Saved reminder.")
+
+    @patch.dict(os.environ, {
+        "TELEGRAM_WEBHOOK_SECRET": "test-secret",
+        "TELEGRAM_CHAT_ID": "42",
+    })
+    @patch("campus_copilot.web.store.mark_seen")
+    @patch("campus_copilot.web.store.is_seen", return_value=False)
+    @patch("campus_copilot.web.notify.github_dispatch")
+    @patch("campus_copilot.web.notify.telegram_reply")
+    @patch("campus_copilot.web._ensure_webhook")
+    def test_task_message_starts_workflow_and_acknowledges(
+            self, _setup, reply, dispatch, _is_seen, mark_seen):
+        response = self.client.post(
+            "/telegram/webhook",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
+            json={"update_id": 20, "message": {
+                "chat": {"id": 42}, "text": "Add a calendar event tomorrow",
+            }},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        dispatch.assert_called_once_with(
+            "telegram-pa", "Add a calendar event tomorrow", "coding")
+        mark_seen.assert_called_once_with("telegram-task-update:20", "telegram-task")
+        self.assertIn("started your task", reply.call_args.args[1])
+
+    @patch.dict(os.environ, {
+        "TELEGRAM_WEBHOOK_SECRET": "test-secret",
+        "TELEGRAM_CHAT_ID": "42",
+    })
+    @patch("campus_copilot.web.store.mark_seen")
+    @patch("campus_copilot.web.store.is_seen", return_value=False)
+    @patch("campus_copilot.web.notify.github_dispatch")
+    @patch("campus_copilot.web.notify.telegram_reply")
+    @patch("campus_copilot.web._ensure_webhook")
+    def test_ask_command_starts_coding_assist(
+            self, _setup, reply, dispatch, _is_seen, mark_seen):
+        response = self.client.post(
+            "/telegram/webhook",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
+            json={"update_id": 21, "message": {
+                "chat": {"id": 42}, "text": "/ask Explain SQL joins",
+            }},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        dispatch.assert_called_once_with("assist", "Explain SQL joins", "coding")
+        self.assertIn("started your request", reply.call_args.args[1])
+        mark_seen.assert_called_once()
+
+    @patch.dict(os.environ, {
+        "TELEGRAM_WEBHOOK_SECRET": "test-secret",
+        "TELEGRAM_CHAT_ID": "42",
+    })
+    @patch("campus_copilot.web.store.is_seen", return_value=False)
+    @patch("campus_copilot.web.notify.github_dispatch")
+    @patch("campus_copilot.web.notify.telegram_reply")
+    @patch("campus_copilot.web._ensure_webhook")
+    def test_dispatch_failure_is_reported(
+            self, _setup, reply, dispatch, _is_seen):
+        dispatch.side_effect = RuntimeError("missing token")
+        response = self.client.post(
+            "/telegram/webhook",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "test-secret"},
+            json={"update_id": 22, "message": {
+                "chat": {"id": 42}, "text": "Save a note",
+            }},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("couldn’t start", reply.call_args.args[1])
 
     @patch.dict(os.environ, {
         "TELEGRAM_WEBHOOK_SECRET": "test-secret",

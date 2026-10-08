@@ -2,6 +2,7 @@
 import hmac
 import logging
 import os
+import re
 import threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -86,10 +87,54 @@ def telegram_webhook():
 
     text = message.get("text")
     if not text:
-        reply = "Please send reminders as text, for example: “Remind me tomorrow at 5 PM to call Maya”."
+        reply = "Please send tasks and reminders as text. Voice messages aren’t supported yet."
     else:
-        reply = personal.handle_message(
-            text, int(update["update_id"]), timezone, now=datetime.now(timezone))
+        text = text.strip()
+        lower_text = text.lower()
+        update_id = int(update["update_id"])
+        reminder_command = re.search(
+            r"(?i)\bremind(?:er)?\b|^/(?:start|help|list|cancel)(?:\s|$)", text)
+        assistant_request = re.match(r"^/(?:do|pa|ask|code|study)\b\s*(.*)$", text, re.I)
+
+        if reminder_command and not assistant_request:
+            reply = personal.handle_message(
+                text, update_id, timezone, now=datetime.now(timezone))
+        elif lower_text in {"help", "/help", "/start"}:
+            reply = personal.handle_message(
+                "/help", update_id, timezone, now=datetime.now(timezone))
+        else:
+            task_text = assistant_request.group(1).strip() if assistant_request else text
+            command = assistant_request.group(0).split()[0].lower() if assistant_request else ""
+            if not task_text:
+                reply = "Please include what you want me to do after the command."
+            elif len(task_text) > 2000:
+                reply = "That request is too long. Please keep it under 2,000 characters."
+            else:
+                task = "assist" if command in {"/ask", "/code", "/study"} else "telegram-pa"
+                mode = "study" if command == "/study" else "coding"
+                try:
+                    marker = f"telegram-task-update:{update_id}"
+                    if store.is_seen(marker):
+                        reply = "I’ve already received that task and it is queued."
+                    else:
+                        notify.github_dispatch(task, task_text, mode)
+                        if task == "assist":
+                            reply = ("I’ve started your request. Hermes will send the answer here "
+                                     "when it finishes; the first run can take several minutes.")
+                        else:
+                            reply = ("I’ve started your task. I can create a Google Calendar event "
+                                     "or save a Notion note; I’ll send the result here. "
+                                     "This can take several minutes.")
+                        try:
+                            store.mark_seen(marker, "telegram-task")
+                        except RuntimeError as exc:
+                            log.error("Task started, but update deduplication failed: %s", exc)
+                            reply = ("The task has started, but I couldn’t save its duplicate "
+                                     "protection. Please don’t resend it.")
+                except RuntimeError as exc:
+                    log.error("Could not dispatch Telegram task: %s", exc)
+                    reply = ("I couldn’t start that task. Check that Render has a valid "
+                             "GITHUB_ACTIONS_TOKEN with Actions write access, then try again.")
     try:
         notify.telegram_reply(configured_chat, reply)
     except RuntimeError as exc:
