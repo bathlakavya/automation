@@ -2,9 +2,8 @@ name: Campus Copilot
 
 on:
   schedule:
-    - cron: "0 2 * * *"    # 07:30 Asia/Kolkata daily brief
-    - cron: "30 0-22/2 * * *" # Every 2 hours, 06:00 through 04:00 Asia/Kolkata
-    - cron: "*/15 * * * *" # Poll Telegram, personal reminders, and Classroom email
+    - cron: "30 0-22/2 * * *" # Check important assignment deadline milestones every 2 hours
+    - cron: "*/15 * * * *" # Check due personal reminders and important Classroom emails
   workflow_dispatch:
     inputs:
       task:
@@ -74,7 +73,7 @@ jobs:
           python-version: "3.11"
 
       - name: Cache Hermes model
-        if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist'))
+        if: github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist')
         uses: actions/cache@v4
         with:
           path: .ollama/models
@@ -89,7 +88,7 @@ jobs:
             copilot-data-
 
       - name: Install and start Ollama
-        if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist'))
+        if: github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist')
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
           sudo systemctl stop ollama || true
@@ -107,7 +106,7 @@ jobs:
           fi
 
       - name: Download Hermes model if not cached
-        if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || (github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist'))
+        if: github.event_name == 'workflow_dispatch' && (inputs.task == 'daily' || inputs.task == 'assist')
         run: |
           if ! ollama show "$HERMES_MODEL" >/dev/null 2>&1; then
             ollama pull "$HERMES_MODEL"
@@ -134,7 +133,7 @@ jobs:
           PY
 
       - name: Run daily brief
-        if: (github.event_name == 'schedule' && github.event.schedule == '0 2 * * *') || (github.event_name == 'workflow_dispatch' && inputs.task == 'daily')
+        if: github.event_name == 'workflow_dispatch' && inputs.task == 'daily'
         run: python -m campus_copilot run
 
       - name: Run deadline reminder

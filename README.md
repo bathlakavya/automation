@@ -4,17 +4,17 @@ Campus Copilot uses a Telegram webhook hosted on Render for direct text conversa
 
 ## What it does
 
-- At **07:30 Asia/Kolkata**, checks Google Classroom (or the configured IMAP fallback), scores new job listings, and sends the daily brief.
+- Keeps unsolicited daily job digests off; run a daily digest manually only when you want it.
 - Telegram messages reach the Render webhook directly. It can acknowledge and save a text reminder without you opening GitHub Actions.
-- Every **15 minutes**, GitHub Actions checks Supabase for due personal reminders and forwards new Classroom notification emails.
-- Every **2 hours**, checks Google Classroom for overdue assignments or deadlines within 24 hours. Reminder messages label items **OVERDUE**, **URGENT** (within 3 hours), **HIGH** (within 6 hours), or **DUE SOON** (within 24 hours).
+- Every **15 minutes**, GitHub Actions checks Supabase for due personal reminders and sends a compact digest only for new actionable Classroom emails (assignments, due dates, quizzes, exams, submissions, and similar items).
+- Every **2 hours**, checks Google Classroom for key deadline milestones: within 6 hours, within 1 hour, and overdue. It sends each milestone once per assignment and does not repeat the same alert every run.
 - On demand, a manual workflow request runs Hermes coding or study help and sends the response to Telegram.
 - Uses **Hermes 3 3B through Ollama** on a temporary GitHub-hosted runner. The model is cached between runs when GitHub's cache is available.
 - Uses **Telegram** for phone and desktop notifications. Telegram delivers messages; GitHub Actions runs the automation.
 - Makes no Claude or Anthropic API calls.
 - Caches the SQLite memory between workflow runs to reduce repeated job alerts and retain job feedback. GitHub cache retention and availability apply.
 
-The Render service uses its free plan, which can sleep when idle. Telegram may take longer to receive an acknowledgement while the service wakes. Due-time reminders are checked by GitHub Actions about every 15 minutes, and scheduled runs may be delayed. GitHub may disable scheduled workflows after prolonged repository inactivity; runner availability and usage limits also apply. Personal reminders and email-deduplication state are stored in Supabase, while job-ranking memory uses the GitHub Actions cache. The first daily or coding/study run may take longer while Hermes downloads.
+The Render service uses its free plan, which can sleep when idle. Telegram may take longer to receive an acknowledgement while the service wakes. Due-time reminders are checked by GitHub Actions about every 15 minutes, and scheduled runs may be delayed. GitHub may disable scheduled workflows after prolonged repository inactivity; runner availability and usage limits also apply. Personal reminders, deadline-alert deduplication, and email-deduplication state are stored in Supabase. The first on-demand coding/study run may take longer while Hermes downloads.
 
 ## Set up GitHub Actions
 
@@ -61,7 +61,7 @@ Without the Supabase secrets, GitHub's automatic due-reminder checks cannot read
 
 Google Classroom OAuth is not connected yet. If Google later allows the required Classroom permission, authorize locally and store the credentials as GitHub secrets `GOOGLE_CREDENTIALS_JSON` and `GOOGLE_TOKEN_JSON`.
 
-As an alternative, configure the GitHub Actions secrets `IMAP_USER` and `IMAP_PASS` (plus optional `IMAP_HOST`, default `imap.gmail.com`) to forward new Classroom notification emails to Telegram. The first email check ignores messages already in the inbox. Email excerpts do not provide reliable exact due dates, so assignment deadline reminders require Classroom API access. University accounts may block IMAP or app passwords.
+As an alternative, configure the GitHub Actions secrets `IMAP_USER` and `IMAP_PASS` (plus optional `IMAP_HOST`, default `imap.gmail.com`) to forward new actionable Classroom notification emails to Telegram. Routine course chatter is ignored and important new emails are grouped into a single brief digest. The first email check ignores messages already in the inbox. Email excerpts do not provide reliable exact due dates, so assignment deadline reminders require Classroom API access. University accounts may block IMAP or app passwords.
 
 ### 7. Optional delivery channels
 
@@ -100,13 +100,12 @@ Open **Actions → Campus Copilot → Run workflow**, select `telegram-test`, th
 
 ### 11. Test and monitor
 
-In the repository, open **Actions → Campus Copilot → Run workflow**, select `daily` or `reminder`, and start the run. Inspect its logs in the Actions tab. Do not add commands that print environment variables or secret values.
+The reminder and email checks run automatically. Use **Actions → Campus Copilot → Run workflow** only when you explicitly want a manual daily digest or to test a check. Inspect its logs in the Actions tab. Do not add commands that print environment variables or secret values.
 
 Scheduled jobs use UTC:
 
-- `0 2 * * *` UTC = 07:30 Asia/Kolkata daily brief
 - `*/15 * * * *` UTC = due personal reminders and Classroom email check (about every 15 minutes)
-- `30 0-22/2 * * *` UTC = deadline check every two hours (06:00, 08:00, ..., 04:00 Asia/Kolkata)
+- `30 0-22/2 * * *` UTC = important assignment deadline milestone check every two hours (06:00, 08:00, ..., 04:00 Asia/Kolkata)
 
 To change these times, edit the cron expressions in the workflow. GitHub Actions cron uses UTC.
 
@@ -137,4 +136,4 @@ The personal-reminder feature supports one-time reminders, listing pending remin
 
 - Google Classroom and Calendar APIs, or IMAP Classroom notification emails.
 - Public Greenhouse, Lever, and Remotive job APIs. It does not scrape LinkedIn or Naukri.
-- SQLite stores seen jobs and feedback in a GitHub Actions cache. Cache availability/retention is controlled by GitHub; if it expires or is evicted, previously seen jobs may be reported again.
+- SQLite stores job-ranking feedback in a GitHub Actions cache. Job digests are manual-only, so they do not create routine Telegram notifications.

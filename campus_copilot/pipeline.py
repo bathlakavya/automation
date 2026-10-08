@@ -116,38 +116,47 @@ def run_daily(cfg):
 
 
 def remind(cfg):
-    """Send an urgency-ranked reminder for overdue or next-24-hour deadlines."""
+    """Send at most one reminder per deadline milestone to avoid repeated nudges."""
     try:
         data = get_classroom(cfg)
     except Exception as e:  # noqa: BLE001
         log.warning("remind failed: %s", e)
         return None
     now = _now(cfg)
-    due_soon = []
+    notices = []
     for a in data["assignments"]:
         if a["due_iso"]:
             d = notify.parse_dt(a["due_iso"])
-            if now - timedelta(days=1) <= d <= now + timedelta(hours=24):
-                due_soon.append((d, a))
-    if not due_soon:
+            remaining = d - now
+            if remaining > timedelta(hours=6):
+                continue
+            if remaining > timedelta(hours=1):
+                milestone, urgency = "6h", "🟠 DUE WITHIN 6 HOURS"
+            elif remaining > timedelta(0):
+                milestone, urgency = "1h", "🔴 DUE WITHIN 1 HOUR"
+            elif remaining >= -timedelta(hours=24):
+                milestone, urgency = "overdue", "🔴 OVERDUE"
+            else:
+                continue
+            key = f"classroom-deadline:{a.get('id', a['title'])}:{a['due_iso']}:{milestone}"
+            if not store.is_seen(key):
+                notices.append((key, d, a, urgency))
+    if not notices:
         return None
     lines = []
-    for due, assignment in sorted(due_soon, key=lambda item: item[0]):
-        remaining = due - now
-        if remaining.total_seconds() <= 0:
-            urgency = "🔴 OVERDUE"
-        elif remaining <= timedelta(hours=3):
-            urgency = "🔴 URGENT"
-        elif remaining <= timedelta(hours=6):
-            urgency = "🟠 HIGH"
-        else:
-            urgency = "🟡 DUE SOON"
+    for _, due, assignment, urgency in sorted(notices, key=lambda item: item[1]):
         line = (f"{urgency} — {assignment['title']} ({assignment['course']})\n"
                 f"Due: {due.strftime('%a %d %b, %I:%M %p')}")
         if assignment["link"]:
             line += f"\n{assignment['link']}"
         lines.append(line)
-    return notify.broadcast("Deadline check — act on the highest urgency first", "\n\n".join(lines))
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not chat_id:
+        raise RuntimeError("Classroom deadline notifications require TELEGRAM_CHAT_ID.")
+    notify.telegram_reply(chat_id, "Classroom deadlines\n\n" + "\n\n".join(lines))
+    for key, _, _, _ in notices:
+        store.mark_seen(key, "classroom-deadline")
+    return {"telegram": "sent"}
 
 
 def scheduled_tick(cfg):
@@ -158,20 +167,24 @@ def scheduled_tick(cfg):
 
     now = _now(cfg)
     due = store.due_reminders(now.isoformat())
-    for reminder in due:
+    if due:
+        lines = [
+            f"• {reminder['title']} — "
+            f"{notify.parse_dt(reminder['due_at']).astimezone(ZoneInfo(cfg['timezone'])):%a %d %b, %I:%M %p}"
+            for reminder in due
+        ]
         notify.telegram_reply(
             chat_id,
-            f"⏰ Reminder: {reminder['title']}\n"
-            f"Scheduled for {notify.parse_dt(reminder['due_at']).astimezone(ZoneInfo(cfg['timezone'])):%a %d %b, %I:%M %p}.",
+            "⏰ Personal reminders\n\n" + "\n".join(lines),
         )
+    for reminder in due:
         store.mark_reminder_sent(reminder["id"])
-    email_count = _poll_classroom_emails(cfg, chat_id)
     email_count = _poll_classroom_emails(cfg, chat_id)
     return {"personal_reminders_sent": len(due), "classroom_emails_sent": email_count}
 
 
 def _poll_classroom_emails(cfg, chat_id):
-    """Forward new Classroom notification emails, baselining existing mail on first setup."""
+    """Send one concise digest for new actionable Classroom email; suppress routine mail."""
     if not (os.getenv("IMAP_USER") and os.getenv("IMAP_PASS")):
         log.info("Classroom email polling skipped; IMAP_USER/IMAP_PASS are not configured.")
         return 0
@@ -184,16 +197,38 @@ def _poll_classroom_emails(cfg, chat_id):
         log.info("Classroom email polling initialized; existing messages were not forwarded.")
         return 0
 
-    sent = 0
+    important = []
     for item in items:
         key = f"classroom-email:{item['email_id']}"
         if store.is_seen(key):
             continue
-        notify.telegram_reply(
-            chat_id,
-            f"📚 Classroom email\n{item['text']}\n"
-            + (f"Received: {item['time']}" if item["time"] else ""),
-        )
+        if _is_actionable_classroom_email(item["text"]):
+            important.append((key, item))
+        else:
+            store.mark_seen(key, "classroom-email")
+    if not important:
+        return 0
+
+    lines = [
+        f"• {item['text'][:700]}" + (f"\n  {item['time']}" if item["time"] else "")
+        for _, item in important[:5]
+    ]
+    extra = len(important) - len(lines)
+    if extra:
+        lines.append(f"…and {extra} more important Classroom email(s).")
+    notify.telegram_reply(chat_id, "Important Classroom updates\n\n" + "\n\n".join(lines))
+    for key, _ in important:
         store.mark_seen(key, "classroom-email")
-        sent += 1
-    return sent
+    return 1
+
+
+def _is_actionable_classroom_email(text):
+    """Ignore routine class chatter; surface likely assignment and assessment actions."""
+    import re
+
+    return bool(re.search(
+        r"\b(assignment|coursework|due|deadline|overdue|submit|submission|quiz|exam|"
+        r"test|assessment|project|practical|lab record)\b",
+        text,
+        re.IGNORECASE,
+    ))
