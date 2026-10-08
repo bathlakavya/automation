@@ -6,7 +6,7 @@ Campus Copilot uses a Telegram webhook hosted on Render for direct text conversa
 
 - Keeps unsolicited daily job digests off; run a daily digest manually only when you want it.
 - Telegram messages reach the Render webhook directly. It can acknowledge and save a text reminder without you opening GitHub Actions.
-- Every **15 minutes**, GitHub Actions checks Supabase for due personal reminders and sends a compact digest only for new actionable Classroom emails (assignments, due dates, quizzes, exams, submissions, and similar items).
+- Every **5 minutes**, GitHub Actions checks Supabase for due personal reminders and sends a compact digest only for new actionable Classroom emails (assignments, due dates, quizzes, exams, submissions, and similar items).
 - Every **2 hours**, checks Google Classroom for key deadline milestones: within 6 hours, within 1 hour, and overdue. It sends each milestone once per assignment and does not repeat the same alert every run.
 - On demand, a manual workflow request runs Hermes coding or study help and sends the response to Telegram.
 - Uses **Hermes 3 3B through Ollama** on a temporary GitHub-hosted runner. The model is cached between runs when GitHub's cache is available.
@@ -14,7 +14,7 @@ Campus Copilot uses a Telegram webhook hosted on Render for direct text conversa
 - Makes no Claude or Anthropic API calls.
 - Caches the SQLite memory between workflow runs to reduce repeated job alerts and retain job feedback. GitHub cache retention and availability apply.
 
-The Render service uses its free plan, which can sleep when idle. Telegram may take longer to receive an acknowledgement while the service wakes. Due-time reminders are checked by GitHub Actions about every 15 minutes, and scheduled runs may be delayed. GitHub may disable scheduled workflows after prolonged repository inactivity; runner availability and usage limits also apply. Personal reminders, deadline-alert deduplication, and email-deduplication state are stored in Supabase. The first on-demand coding/study run may take longer while Hermes downloads.
+The Render service uses its free plan, which can sleep when idle. Telegram may take longer to receive an acknowledgement while the service wakes. Due-time reminders are checked by GitHub Actions about every 5 minutes, and scheduled runs may be delayed, so delivery is not guaranteed at the exact requested minute. GitHub may disable scheduled workflows after prolonged repository inactivity; runner availability and usage limits also apply. Personal reminders, deadline-alert deduplication, and email-deduplication state are stored in Supabase. The first on-demand coding/study run may take longer while Hermes downloads.
 
 ## Set up GitHub Actions
 

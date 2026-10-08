@@ -3,7 +3,7 @@ name: Campus Copilot
 on:
   schedule:
     - cron: "30 0-22/2 * * *" # Check important assignment deadline milestones every 2 hours
-    - cron: "*/15 * * * *" # Check due personal reminders and important Classroom emails
+    - cron: "*/5 * * * *" # Check due personal reminders and important Classroom emails
   workflow_dispatch:
     inputs:
       task:
