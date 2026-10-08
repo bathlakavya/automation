@@ -24,7 +24,14 @@ def _parse_request(text, now, timezone):
     if matches:
         phrase, due = matches[0]
         due = due.astimezone(timezone)
-        has_time = bool(clock and clock.group(0).strip().lower() in phrase.lower())
+        has_time = bool(
+            (clock and clock.group(0).strip().lower() in phrase.lower())
+            or re.search(
+                r"\b(?:in\s+)?(?:\d+|a|an)\s+(?:seconds?|minutes?|hours?)\b",
+                phrase,
+                re.I,
+            )
+        )
     elif clock:
         phrase = clock.group(0)
         hour = int(clock.group("hour")) % 12

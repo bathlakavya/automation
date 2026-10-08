@@ -31,6 +31,22 @@ class PersonalReminderTests(unittest.TestCase):
 
         self.assertEqual(parsed[1], datetime(2026, 10, 9, 10, 30, tzinfo=self.tz))
 
+    def test_relative_minutes_keeps_parsed_time(self):
+        parsed = personal._parse_request(
+            "Remind me in 20 minutes to test notifications", self.now, self.tz)
+
+        self.assertEqual(parsed[0], "test notifications")
+        self.assertEqual(parsed[1], datetime(2026, 10, 8, 12, 20, tzinfo=self.tz))
+        self.assertFalse(parsed[2])
+
+    def test_relative_hours_keeps_parsed_time(self):
+        parsed = personal._parse_request(
+            "Remind me in 2 hours to take a break", self.now, self.tz)
+
+        self.assertEqual(parsed[0], "take a break")
+        self.assertEqual(parsed[1], datetime(2026, 10, 8, 14, 0, tzinfo=self.tz))
+        self.assertFalse(parsed[2])
+
     def test_date_without_time_defaults_to_nine_am(self):
         parsed = personal._parse_request(
             "Remind me tomorrow to submit the assignment", self.now, self.tz)
