@@ -141,7 +141,7 @@ jobs:
         run: python -m campus_copilot remind
 
       - name: Deliver due Telegram reminders and check Classroom email
-        if: (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.task == 'scheduled-tick')
+        if: (github.event_name == 'schedule' && github.event.schedule == '*/5 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.task == 'scheduled-tick')
         run: python -m campus_copilot scheduled-tick
 
       - name: Answer coding or study request
