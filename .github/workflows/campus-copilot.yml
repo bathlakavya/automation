@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: "0 2 * * *"    # 07:30 Asia/Kolkata daily brief
     - cron: "30 0-22/2 * * *" # Every 2 hours, 06:00 through 04:00 Asia/Kolkata
+    - cron: "*/15 * * * *" # Poll Telegram, personal reminders, and Classroom email
   workflow_dispatch:
     inputs:
       task:
@@ -13,6 +14,7 @@ on:
         options:
           - daily
           - reminder
+          - telegram-poll
           - assist
           - telegram-test
       mode:
@@ -136,6 +138,10 @@ jobs:
       - name: Run deadline reminder
         if: (github.event_name == 'schedule' && github.event.schedule == '30 0-22/2 * * *') || (github.event_name == 'workflow_dispatch' && inputs.task == 'reminder')
         run: python -m campus_copilot remind
+
+      - name: Poll Telegram and Classroom email
+        if: (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.task == 'telegram-poll')
+        run: python -m campus_copilot telegram-poll
 
       - name: Answer coding or study request
         if: github.event_name == 'workflow_dispatch' && inputs.task == 'assist'

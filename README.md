@@ -5,6 +5,7 @@ Campus Copilot uses scheduled GitHub Actions as its backend, runs the configured
 ## What it does
 
 - At **07:30 Asia/Kolkata**, checks Google Classroom (or the configured IMAP fallback), scores new job listings, and sends the daily brief.
+- Every **15 minutes**, checks Telegram for personal reminder messages and forwards new Classroom notification emails.
 - Every **2 hours**, checks Google Classroom for overdue assignments or deadlines within 24 hours. Reminder messages label items **OVERDUE**, **URGENT** (within 3 hours), **HIGH** (within 6 hours), or **DUE SOON** (within 24 hours).
 - On demand, a manual workflow request runs Hermes coding or study help and sends the response to Telegram.
 - Uses **Hermes 3 3B through Ollama** on a temporary GitHub-hosted runner. The model is cached between runs when GitHub's cache is available.
@@ -12,7 +13,7 @@ Campus Copilot uses scheduled GitHub Actions as its backend, runs the configured
 - Makes no Claude or Anthropic API calls.
 - Caches the SQLite memory between workflow runs to reduce repeated job alerts and retain job feedback. GitHub cache retention and availability apply.
 
-The scheduled runner starts only for a workflow run; this is not a continuously running server. GitHub may delay scheduled workflows, and GitHub plan usage, repository activity, runner availability, and cache limits apply. Scheduled workflows may be disabled by GitHub after prolonged repository inactivity. Deadline checks do not start Ollama, avoiding model startup on those runs. The first daily or coding/study run may take longer while Hermes downloads.
+The scheduled runner starts only for a workflow run; this is not a continuously running server. GitHub may delay scheduled workflows, and GitHub plan usage, repository activity, runner availability, and cache limits apply. Scheduled workflows may be disabled by GitHub after prolonged repository inactivity. Personal reminders and email-deduplication state use the GitHub Actions cache, so cache eviction can lose that state. Deadline checks do not start Ollama, avoiding model startup on those runs. The first daily or coding/study run may take longer while Hermes downloads.
 
 ## Set up GitHub Actions
 
@@ -50,7 +51,9 @@ If Google OAuth is unavailable for your university account, configure these Acti
 - `IMAP_USER`
 - `IMAP_PASS` (use an app password where applicable)
 
-Without Google Classroom credentials or working IMAP credentials, the workflow cannot retrieve your assignment/deadline data.
+The 15-minute workflow also checks this inbox and forwards new Classroom notification emails to Telegram. It ignores mail already present the first time polling is enabled. The email fallback forwards the email subject and a short plain-text excerpt; it cannot reliably reconstruct Classroom assignment status or exact due dates, so the separate 2-hour assignment-deadline check needs working Google Classroom API access.
+
+Your university may disable IMAP or app passwords. If email access is blocked, use the email notifications already delivered to your inbox; automated forwarding from Campus Copilot will not work until IMAP access is available.
 
 ### 4. Optional delivery channels
 
@@ -62,7 +65,17 @@ Telegram is enough for notifications on multiple devices. To also use other exis
 
 Leave unused secrets unset. GitHub Actions injects configured secrets as environment variables at runtime.
 
-### 5. Ask for coding or study help when needed
+### 5. Send personal reminders to your Telegram bot
+
+After the new workflow is published and the Telegram secrets are configured, send your bot a message like:
+
+```text
+Remind me tomorrow at 5:30 PM to call Maya
+```
+
+Campus Copilot confirms and stores the one-time reminder, then messages you when it is due. Times use the timezone in `config.yaml` (`Asia/Kolkata` by default); if you omit a time, it uses 09:00. Send `/list` to see pending reminders, `/cancel ID` to cancel one, or `/help` for instructions. The scheduled workflow checks approximately every 15 minutes, but GitHub can delay it. Do not send secrets, passwords, or private credentials to the bot.
+
+### 6. Ask for coding or study help when needed
 
 Open the repository's **Actions → Campus Copilot → Run workflow** form:
 
@@ -73,17 +86,18 @@ Open the repository's **Actions → Campus Copilot → Run workflow** form:
 
 This is an on-demand workflow, not a live Telegram chat bot. You start it from GitHub Actions; GitHub runs Hermes and Telegram delivers the answer. It needs the Telegram secrets and may take longer on the first run while the model is downloaded.
 
-### 6. Test Telegram notifications
+### 7. Test Telegram notifications
 
 Open **Actions → Campus Copilot → Run workflow**, select `telegram-test`, then start the run. It sends one short test message without starting Ollama. If the action fails, confirm that both Telegram repository secrets are set and that you started a chat with your bot.
 
-### 7. Test and monitor
+### 8. Test and monitor
 
 In the repository, open **Actions → Campus Copilot → Run workflow**, select `daily` or `reminder`, and start the run. Inspect its logs in the Actions tab. Do not add commands that print environment variables or secret values.
 
 Scheduled jobs use UTC:
 
 - `0 2 * * *` UTC = 07:30 Asia/Kolkata daily brief
+- `*/15 * * * *` UTC = Telegram and Classroom email poll (about every 15 minutes)
 - `30 0-22/2 * * *` UTC = deadline check every two hours (06:00, 08:00, ..., 04:00 Asia/Kolkata)
 
 To change these times, edit the cron expressions in the workflow. GitHub Actions cron uses UTC.
@@ -109,7 +123,7 @@ python -m campus_copilot feedback a1b2c3d4 up
 
 ## What task information it currently uses
 
-The current application can brief and remind you about unsubmitted Classroom assignments, announcements, and discovered jobs. It does not yet include the full academic planner or a personal task database described in the architecture audit. Add future task-management features to the application before expecting GitHub Actions to notify you about those tasks.
+The personal-reminder feature supports one-time reminders, listing pending reminders, and cancelling them. It is not a full academic planner and does not support recurring reminders yet.
 
 ## Data sources
 

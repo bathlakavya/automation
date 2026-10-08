@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from . import classroom, jobs, llm, notify, store
+from . import classroom, jobs, llm, notify, personal, store
 
 log = logging.getLogger("copilot")
 
@@ -148,3 +148,64 @@ def remind(cfg):
             line += f"\n{assignment['link']}"
         lines.append(line)
     return notify.broadcast("Deadline check — act on the highest urgency first", "\n\n".join(lines))
+
+
+def telegram_poll(cfg):
+    """Read bot messages, send due personal reminders, and forward new Classroom emails."""
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not chat_id:
+        raise RuntimeError("Telegram polling requires TELEGRAM_CHAT_ID.")
+
+    updates = notify.telegram_updates(int(store.get_state("telegram_update_offset") or 0))
+    for update in updates:
+        update_id = int(update["update_id"])
+        message = update.get("message", {})
+        chat = message.get("chat", {})
+        if str(chat.get("id", "")) == str(chat_id) and message.get("text"):
+            reply = personal.handle_message(
+                message["text"], update_id, ZoneInfo(cfg["timezone"]), now=_now(cfg))
+            notify.telegram_reply(chat_id, reply)
+        store.set_state("telegram_update_offset", update_id + 1)
+
+    now = _now(cfg)
+    due = store.due_reminders(now.isoformat())
+    for reminder in due:
+        notify.telegram_reply(
+            chat_id,
+            f"⏰ Reminder: {reminder['title']}\n"
+            f"Scheduled for {notify.parse_dt(reminder['due_at']).astimezone(ZoneInfo(cfg['timezone'])):%a %d %b, %I:%M %p}.",
+        )
+        store.mark_reminder_sent(reminder["id"])
+
+    email_count = _poll_classroom_emails(cfg, chat_id)
+    return {"telegram_messages": len(updates), "personal_reminders_sent": len(due),
+            "classroom_emails_sent": email_count}
+
+
+def _poll_classroom_emails(cfg, chat_id):
+    """Forward new Classroom notification emails, baselining existing mail on first setup."""
+    if not (os.getenv("IMAP_USER") and os.getenv("IMAP_PASS")):
+        log.info("Classroom email polling skipped; IMAP_USER/IMAP_PASS are not configured.")
+        return 0
+    data = classroom.fetch_imap(cfg)
+    items = data["announcements"]
+    if store.get_state("classroom_email_baselined") is None:
+        for item in items:
+            store.mark_seen(f"classroom-email:{item['email_id']}", "classroom-email")
+        store.set_state("classroom_email_baselined", "1")
+        log.info("Classroom email polling initialized; existing messages were not forwarded.")
+        return 0
+
+    sent = 0
+    for item in items:
+        key = f"classroom-email:{item['email_id']}"
+        if store.is_seen(key):
+            continue
+        notify.telegram_reply(
+            chat_id,
+            f"📚 Classroom email\n{item['text']}\n"
+            + (f"Received: {item['time']}" if item["time"] else ""),
+        )
+        store.mark_seen(key, "classroom-email")
+        sent += 1
+    return sent

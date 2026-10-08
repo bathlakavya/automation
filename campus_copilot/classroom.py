@@ -1,6 +1,9 @@
 """Google Classroom via API, with an IMAP (notification-email) fallback for locked-down college accounts."""
 import os
+import re
+import html
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -101,12 +104,49 @@ def fetch_imap(cfg):
     M.login(os.environ["IMAP_USER"], os.environ["IMAP_PASS"])
     M.select("INBOX")
     since = (datetime.now() - timedelta(days=cfg["classroom"]["lookback_days"])).strftime("%d-%b-%Y")
-    _, data = M.search(None, f'(FROM "classroom.google.com" SINCE {since})')
+    status, data = M.search(None, f'(FROM "classroom.google.com" SINCE {since})')
+    if status != "OK":
+        M.logout()
+        raise RuntimeError("Could not search the Classroom notification mailbox.")
     items = []
-    for num in data[0].split()[-40:]:
-        _, msg_data = M.fetch(num, "(RFC822.HEADER)")
-        msg = email.message_from_bytes(msg_data[0][1])
-        subject = str(make_header(decode_header(msg.get("Subject", ""))))
-        items.append({"course": "(from email)", "text": subject, "time": msg.get("Date", ""), "link": ""})
-    M.logout()
+    try:
+        for num in data[0].split()[-40:]:
+            result, msg_data = M.fetch(num, "(RFC822)")
+            if result != "OK":
+                raise RuntimeError("Could not read a Classroom notification email.")
+            raw = next((part[1] for part in msg_data if isinstance(part, tuple)), None)
+            if raw is None:
+                raise RuntimeError("Classroom notification email had no message content.")
+            msg = email.message_from_bytes(raw)
+            subject = str(make_header(decode_header(msg.get("Subject", ""))))
+            snippet = _plain_email_text(msg)
+            email_id = msg.get("Message-ID") or num.decode("ascii", errors="replace")
+            try:
+                received = parsedate_to_datetime(msg.get("Date", "")).isoformat()
+            except (TypeError, ValueError):
+                received = msg.get("Date", "")
+            items.append({
+                "course": "(from email)",
+                "text": subject + (f"\n{snippet}" if snippet else ""),
+                "time": received,
+                "link": "",
+                "email_id": email_id,
+            })
+    finally:
+        M.logout()
     return {"source": "imap", "assignments": [], "announcements": items, "materials": []}
+
+
+def _plain_email_text(msg):
+    """Return a short plain-text email excerpt without forwarding HTML markup."""
+    parts = msg.walk() if msg.is_multipart() else (msg,)
+    for part in parts:
+        if part.get_content_type() != "text/plain" or part.get_content_disposition() == "attachment":
+            continue
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            continue
+        charset = part.get_content_charset() or "utf-8"
+        text = payload.decode(charset, errors="replace")
+        return re.sub(r"\s+", " ", html.unescape(text)).strip()[:700]
+    return ""

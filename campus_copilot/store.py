@@ -1,23 +1,40 @@
 """SQLite memory for deduplication and job feedback."""
 import sqlite3
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DB = ROOT / "data" / "copilot.db"
 
 
+@contextmanager
 def conn():
     DB.parent.mkdir(exist_ok=True)
     c = sqlite3.connect(DB)
-    c.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS seen(key TEXT PRIMARY KEY, kind TEXT, ts REAL);
-        CREATE TABLE IF NOT EXISTS feedback(
-            job_key TEXT PRIMARY KEY, title TEXT, company TEXT, label INTEGER, ts REAL);
-        """
-    )
-    return c
+    try:
+        c.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS seen(key TEXT PRIMARY KEY, kind TEXT, ts REAL);
+            CREATE TABLE IF NOT EXISTS feedback(
+                job_key TEXT PRIMARY KEY, title TEXT, company TEXT, label INTEGER, ts REAL);
+            CREATE TABLE IF NOT EXISTS app_state(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS personal_reminders(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                due_at TEXT NOT NULL,
+                source_update_id INTEGER UNIQUE,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at REAL NOT NULL);
+            """
+        )
+        yield c
+        c.commit()
+    except Exception:
+        c.rollback()
+        raise
+    finally:
+        c.close()
 
 
 def is_seen(key):
@@ -65,3 +82,57 @@ def recent_feedback(limit=6):
         rows = c.execute(
             "SELECT title, company, label FROM feedback ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
     return [{"title": t, "company": co, "liked": bool(l)} for t, co, l in rows]
+
+
+def get_state(key):
+    with conn() as c:
+        row = c.execute("SELECT value FROM app_state WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def set_state(key, value):
+    with conn() as c:
+        c.execute("INSERT OR REPLACE INTO app_state VALUES (?,?)", (key, str(value)))
+
+
+def add_reminder(title, due_at, source_update_id):
+    with conn() as c:
+        cur = c.execute(
+            """INSERT OR IGNORE INTO personal_reminders
+               (title, due_at, source_update_id, created_at) VALUES (?,?,?,?)""",
+            (title, due_at, source_update_id, time.time()))
+        if cur.rowcount:
+            return cur.lastrowid
+        row = c.execute("SELECT id FROM personal_reminders WHERE source_update_id=?",
+                        (source_update_id,)).fetchone()
+    return row[0]
+
+
+def pending_reminders():
+    with conn() as c:
+        rows = c.execute(
+            "SELECT id, title, due_at FROM personal_reminders "
+            "WHERE status='pending' ORDER BY due_at, id").fetchall()
+    return [{"id": i, "title": title, "due_at": due_at} for i, title, due_at in rows]
+
+
+def due_reminders(now_iso):
+    with conn() as c:
+        rows = c.execute(
+            "SELECT id, title, due_at FROM personal_reminders "
+            "WHERE status='pending' AND due_at<=? ORDER BY due_at, id",
+            (now_iso,)).fetchall()
+    return [{"id": i, "title": title, "due_at": due_at} for i, title, due_at in rows]
+
+
+def mark_reminder_sent(reminder_id):
+    with conn() as c:
+        c.execute("UPDATE personal_reminders SET status='sent' WHERE id=? AND status='pending'",
+                  (reminder_id,))
+
+
+def cancel_reminder(reminder_id):
+    with conn() as c:
+        cur = c.execute("UPDATE personal_reminders SET status='cancelled' "
+                        "WHERE id=? AND status='pending'", (reminder_id,))
+    return cur.rowcount > 0

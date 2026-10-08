@@ -29,6 +29,47 @@ def telegram(title, body):
     return True
 
 
+def telegram_updates(offset):
+    """Fetch pending private-chat updates without exposing the bot token in errors."""
+    tok = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not tok:
+        raise RuntimeError("Telegram polling requires TELEGRAM_BOT_TOKEN.")
+    try:
+        response = requests.get(
+            f"https://api.telegram.org/bot{tok}/getUpdates",
+            params={"offset": offset, "limit": 100, "timeout": 0,
+                    "allowed_updates": '["message"]'},
+            timeout=20,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise RuntimeError(f"Telegram polling failed ({type(exc).__name__}).") from None
+    if not payload.get("ok"):
+        raise RuntimeError("Telegram rejected polling; check that no webhook is configured for this bot.")
+    return payload.get("result", [])
+
+
+def telegram_reply(chat_id, text):
+    """Reply in the configured Telegram chat."""
+    tok = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not tok:
+        raise RuntimeError("Telegram replies require TELEGRAM_BOT_TOKEN.")
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{tok}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
+            timeout=30,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise RuntimeError(f"Telegram reply failed ({type(exc).__name__}).") from None
+    if not payload.get("ok"):
+        raise RuntimeError("Telegram did not accept the reply.")
+    return True
+
+
 def email(title, body):
     user, pwd, to = os.getenv("SMTP_USER"), os.getenv("SMTP_PASS"), os.getenv("EMAIL_TO")
     if not (user and pwd and to):
