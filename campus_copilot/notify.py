@@ -1,6 +1,7 @@
 ﻿"""Fan-out delivery: Telegram, Email, WhatsApp (Twilio), Notion, Google Calendar. Missing keys => channel skipped."""
 import logging
 import os
+import re
 import smtplib
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
@@ -29,27 +30,6 @@ def telegram(title, body):
     return True
 
 
-def telegram_updates(offset):
-    """Fetch pending private-chat updates without exposing the bot token in errors."""
-    tok = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not tok:
-        raise RuntimeError("Telegram polling requires TELEGRAM_BOT_TOKEN.")
-    try:
-        response = requests.get(
-            f"https://api.telegram.org/bot{tok}/getUpdates",
-            params={"offset": offset, "limit": 100, "timeout": 0,
-                    "allowed_updates": '["message"]'},
-            timeout=20,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except (requests.RequestException, ValueError) as exc:
-        raise RuntimeError(f"Telegram polling failed ({type(exc).__name__}).") from None
-    if not payload.get("ok"):
-        raise RuntimeError("Telegram rejected polling; check that no webhook is configured for this bot.")
-    return payload.get("result", [])
-
-
 def telegram_reply(chat_id, text):
     """Reply in the configured Telegram chat."""
     tok = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -67,6 +47,29 @@ def telegram_reply(chat_id, text):
         raise RuntimeError(f"Telegram reply failed ({type(exc).__name__}).") from None
     if not payload.get("ok"):
         raise RuntimeError("Telegram did not accept the reply.")
+    return True
+
+
+def telegram_set_webhook(webhook_url, secret_token):
+    """Register Telegram's webhook, rejecting malformed configuration without exposing secrets."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise RuntimeError("Telegram webhook requires TELEGRAM_BOT_TOKEN.")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", secret_token or ""):
+        raise RuntimeError("TELEGRAM_WEBHOOK_SECRET must be 1–256 letters, numbers, underscores, or hyphens.")
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{token}/setWebhook",
+            json={"url": webhook_url, "secret_token": secret_token,
+                  "allowed_updates": ["message"], "drop_pending_updates": False},
+            timeout=20,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise RuntimeError(f"Telegram webhook setup failed ({type(exc).__name__}).") from None
+    if not payload.get("ok"):
+        raise RuntimeError("Telegram did not accept the webhook configuration.")
     return True
 
 

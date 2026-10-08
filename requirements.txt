@@ -4,3 +4,5 @@ python-dotenv>=1.0
 google-api-python-client>=2.120
 google-auth-oauthlib>=1.2
 dateparser>=1.2
+Flask>=3.0
+gunicorn>=22.0

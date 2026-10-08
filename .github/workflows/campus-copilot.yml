@@ -14,7 +14,7 @@ on:
         options:
           - daily
           - reminder
-          - telegram-poll
+          - scheduled-tick
           - assist
           - telegram-test
       mode:
@@ -62,6 +62,8 @@ jobs:
       NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
       GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
       GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - name: Check out Campus Copilot
         uses: actions/checkout@v4
@@ -139,9 +141,9 @@ jobs:
         if: (github.event_name == 'schedule' && github.event.schedule == '30 0-22/2 * * *') || (github.event_name == 'workflow_dispatch' && inputs.task == 'reminder')
         run: python -m campus_copilot remind
 
-      - name: Poll Telegram and Classroom email
-        if: (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.task == 'telegram-poll')
-        run: python -m campus_copilot telegram-poll
+      - name: Deliver due Telegram reminders and check Classroom email
+        if: (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *') || (github.event_name == 'workflow_dispatch' && inputs.task == 'scheduled-tick')
+        run: python -m campus_copilot scheduled-tick
 
       - name: Answer coding or study request
         if: github.event_name == 'workflow_dispatch' && inputs.task == 'assist'

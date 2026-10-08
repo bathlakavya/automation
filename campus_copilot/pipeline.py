@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from . import classroom, jobs, llm, notify, personal, store
+from . import classroom, jobs, llm, notify, store
 
 log = logging.getLogger("copilot")
 
@@ -150,22 +150,11 @@ def remind(cfg):
     return notify.broadcast("Deadline check — act on the highest urgency first", "\n\n".join(lines))
 
 
-def telegram_poll(cfg):
-    """Read bot messages, send due personal reminders, and forward new Classroom emails."""
+def scheduled_tick(cfg):
+    """Deliver due reminders and forward Classroom emails from a scheduled runner."""
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     if not chat_id:
-        raise RuntimeError("Telegram polling requires TELEGRAM_CHAT_ID.")
-
-    updates = notify.telegram_updates(int(store.get_state("telegram_update_offset") or 0))
-    for update in updates:
-        update_id = int(update["update_id"])
-        message = update.get("message", {})
-        chat = message.get("chat", {})
-        if str(chat.get("id", "")) == str(chat_id) and message.get("text"):
-            reply = personal.handle_message(
-                message["text"], update_id, ZoneInfo(cfg["timezone"]), now=_now(cfg))
-            notify.telegram_reply(chat_id, reply)
-        store.set_state("telegram_update_offset", update_id + 1)
+        raise RuntimeError("Scheduled notification delivery requires TELEGRAM_CHAT_ID.")
 
     now = _now(cfg)
     due = store.due_reminders(now.isoformat())
@@ -176,10 +165,9 @@ def telegram_poll(cfg):
             f"Scheduled for {notify.parse_dt(reminder['due_at']).astimezone(ZoneInfo(cfg['timezone'])):%a %d %b, %I:%M %p}.",
         )
         store.mark_reminder_sent(reminder["id"])
-
     email_count = _poll_classroom_emails(cfg, chat_id)
-    return {"telegram_messages": len(updates), "personal_reminders_sent": len(due),
-            "classroom_emails_sent": email_count}
+    email_count = _poll_classroom_emails(cfg, chat_id)
+    return {"personal_reminders_sent": len(due), "classroom_emails_sent": email_count}
 
 
 def _poll_classroom_emails(cfg, chat_id):

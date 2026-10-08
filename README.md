@@ -1,11 +1,12 @@
 # Campus Copilot
 
-Campus Copilot uses scheduled GitHub Actions as its backend, runs the configured Hermes model through Ollama during each workflow run, and can deliver daily briefs and deadline reminders to Telegram. Your laptop does not need to be on when the workflow runs.
+Campus Copilot uses a Telegram webhook hosted on Render for direct text conversations, Supabase to store personal reminders, and scheduled GitHub Actions to deliver reminders when they are due. Your laptop does not need to be on.
 
 ## What it does
 
 - At **07:30 Asia/Kolkata**, checks Google Classroom (or the configured IMAP fallback), scores new job listings, and sends the daily brief.
-- Every **15 minutes**, checks Telegram for personal reminder messages and forwards new Classroom notification emails.
+- Telegram messages reach the Render webhook directly. It can acknowledge and save a text reminder without you opening GitHub Actions.
+- Every **15 minutes**, GitHub Actions checks Supabase for due personal reminders and forwards new Classroom notification emails.
 - Every **2 hours**, checks Google Classroom for overdue assignments or deadlines within 24 hours. Reminder messages label items **OVERDUE**, **URGENT** (within 3 hours), **HIGH** (within 6 hours), or **DUE SOON** (within 24 hours).
 - On demand, a manual workflow request runs Hermes coding or study help and sends the response to Telegram.
 - Uses **Hermes 3 3B through Ollama** on a temporary GitHub-hosted runner. The model is cached between runs when GitHub's cache is available.
@@ -13,7 +14,7 @@ Campus Copilot uses scheduled GitHub Actions as its backend, runs the configured
 - Makes no Claude or Anthropic API calls.
 - Caches the SQLite memory between workflow runs to reduce repeated job alerts and retain job feedback. GitHub cache retention and availability apply.
 
-The scheduled runner starts only for a workflow run; this is not a continuously running server. GitHub may delay scheduled workflows, and GitHub plan usage, repository activity, runner availability, and cache limits apply. Scheduled workflows may be disabled by GitHub after prolonged repository inactivity. Personal reminders and email-deduplication state use the GitHub Actions cache, so cache eviction can lose that state. Deadline checks do not start Ollama, avoiding model startup on those runs. The first daily or coding/study run may take longer while Hermes downloads.
+The Render service uses its free plan, which can sleep when idle. Telegram may take longer to receive an acknowledgement while the service wakes. Due-time reminders are checked by GitHub Actions about every 15 minutes, and scheduled runs may be delayed. GitHub may disable scheduled workflows after prolonged repository inactivity; runner availability and usage limits also apply. Personal reminders and email-deduplication state are stored in Supabase, while job-ranking memory uses the GitHub Actions cache. The first daily or coding/study run may take longer while Hermes downloads.
 
 ## Set up GitHub Actions
 
@@ -27,35 +28,42 @@ The workflow is [`.github/workflows/campus-copilot.yml`](.github/workflows/campu
 
 In Telegram, chat with **@BotFather**, create a bot, and save its token. Open the bot's chat from each device where you want notifications and press Start. Obtain the chat ID for the destination chat (a private chat or a group where the bot is present).
 
-Add these repository secrets under **Settings → Secrets and variables → Actions → New repository secret**:
+Keep the bot token private. You will enter `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` as environment variables in Render and as repository secrets in GitHub.
+
+### 3. Create a Supabase database
+
+1. Create a Supabase project using its free plan.
+2. In the Supabase SQL Editor, run [`supabase/schema.sql`](supabase/schema.sql).
+3. Copy the project URL and the `service_role` secret key from the Supabase project API settings. Do not use the public `anon` key for this private bot.
+4. You will add these as `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in Render and GitHub Actions. The service-role key is highly sensitive; never paste it in chat or commit it.
+
+### 4. Deploy the Telegram bot to Render
+
+1. Sign in to Render and choose **New → Blueprint**.
+2. Connect the GitHub repository `bathlakavya/automation` and select its `main` branch. Render will read [`render.yaml`](render.yaml).
+3. When prompted, provide `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`. Render generates `TELEGRAM_WEBHOOK_SECRET`.
+4. Deploy the Blueprint. Wait until Render reports the service as healthy; its health check registers the Telegram webhook automatically.
+
+The free Render service may sleep when idle, so the first reply after sleep can be delayed. Render's local filesystem is temporary; reminders live in Supabase so they survive service restarts.
+
+### 5. Add GitHub Actions secrets
+
+In the GitHub repository, open **Settings → Secrets and variables → Actions → New repository secret** and add:
 
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
 
-Treat the bot token like a password. Do not paste it into source code or workflow logs.
+Without the Supabase secrets, GitHub's automatic due-reminder checks cannot read the saved reminders.
 
-### 3. Configure academic data
+### 6. Configure academic data (optional)
 
-For Google Classroom, authorize on your own computer:
+Google Classroom OAuth is not connected yet. If Google later allows the required Classroom permission, authorize locally and store the credentials as GitHub secrets `GOOGLE_CREDENTIALS_JSON` and `GOOGLE_TOKEN_JSON`.
 
-1. Create a Google OAuth Desktop client and save its JSON as `secrets/credentials.json`.
-2. Copy `.env.example` to `.env`, install requirements locally, and run `python -m campus_copilot auth`.
-3. Add the complete contents of `secrets/credentials.json` as the GitHub Actions secret `GOOGLE_CREDENTIALS_JSON`.
-4. Add the complete contents of `secrets/token.json` as the GitHub Actions secret `GOOGLE_TOKEN_JSON`.
+As an alternative, configure the GitHub Actions secrets `IMAP_USER` and `IMAP_PASS` (plus optional `IMAP_HOST`, default `imap.gmail.com`) to forward new Classroom notification emails to Telegram. The first email check ignores messages already in the inbox. Email excerpts do not provide reliable exact due dates, so assignment deadline reminders require Classroom API access. University accounts may block IMAP or app passwords.
 
-The workflow materializes these secret values as temporary files for its run. The Google refresh token must remain valid and its configured scopes must include Classroom access. `CALENDAR_SYNC` is controlled by the repository's configuration/environment; Google Calendar event creation also requires the Calendar scope.
-
-If Google OAuth is unavailable for your university account, configure these Actions secrets for the IMAP fallback instead:
-
-- `IMAP_HOST` (optional; defaults to `imap.gmail.com`)
-- `IMAP_USER`
-- `IMAP_PASS` (use an app password where applicable)
-
-The 15-minute workflow also checks this inbox and forwards new Classroom notification emails to Telegram. It ignores mail already present the first time polling is enabled. The email fallback forwards the email subject and a short plain-text excerpt; it cannot reliably reconstruct Classroom assignment status or exact due dates, so the separate 2-hour assignment-deadline check needs working Google Classroom API access.
-
-Your university may disable IMAP or app passwords. If email access is blocked, use the email notifications already delivered to your inbox; automated forwarding from Campus Copilot will not work until IMAP access is available.
-
-### 4. Optional delivery channels
+### 7. Optional delivery channels
 
 Telegram is enough for notifications on multiple devices. To also use other existing channels, add the matching secrets:
 
@@ -65,17 +73,17 @@ Telegram is enough for notifications on multiple devices. To also use other exis
 
 Leave unused secrets unset. GitHub Actions injects configured secrets as environment variables at runtime.
 
-### 5. Send personal reminders to your Telegram bot
+### 8. Send personal reminders to your Telegram bot
 
-After the new workflow is published and the Telegram secrets are configured, send your bot a message like:
+After Render deploys successfully, send your bot a text message like:
 
 ```text
 Remind me tomorrow at 5:30 PM to call Maya
 ```
 
-Campus Copilot confirms and stores the one-time reminder, then messages you when it is due. Times use the timezone in `config.yaml` (`Asia/Kolkata` by default); if you omit a time, it uses 09:00. Send `/list` to see pending reminders, `/cancel ID` to cancel one, or `/help` for instructions. The scheduled workflow checks approximately every 15 minutes, but GitHub can delay it. Do not send secrets, passwords, or private credentials to the bot.
+The Render webhook acknowledges the message and stores the one-time reminder in Supabase. GitHub Actions checks about every 15 minutes and sends a Telegram notification when it is due; GitHub can delay that check. Times use `Asia/Kolkata` by default; if you omit the time, it uses 09:00. Send `/list` to see pending reminders, `/cancel ID` to cancel one, or `/help` for instructions. Only text reminders are supported. Do not send secrets, passwords, or private credentials to the bot.
 
-### 6. Ask for coding or study help when needed
+### 9. Ask for coding or study help when needed
 
 Open the repository's **Actions → Campus Copilot → Run workflow** form:
 
@@ -86,18 +94,18 @@ Open the repository's **Actions → Campus Copilot → Run workflow** form:
 
 This is an on-demand workflow, not a live Telegram chat bot. You start it from GitHub Actions; GitHub runs Hermes and Telegram delivers the answer. It needs the Telegram secrets and may take longer on the first run while the model is downloaded.
 
-### 7. Test Telegram notifications
+### 10. Test Telegram notifications
 
 Open **Actions → Campus Copilot → Run workflow**, select `telegram-test`, then start the run. It sends one short test message without starting Ollama. If the action fails, confirm that both Telegram repository secrets are set and that you started a chat with your bot.
 
-### 8. Test and monitor
+### 11. Test and monitor
 
 In the repository, open **Actions → Campus Copilot → Run workflow**, select `daily` or `reminder`, and start the run. Inspect its logs in the Actions tab. Do not add commands that print environment variables or secret values.
 
 Scheduled jobs use UTC:
 
 - `0 2 * * *` UTC = 07:30 Asia/Kolkata daily brief
-- `*/15 * * * *` UTC = Telegram and Classroom email poll (about every 15 minutes)
+- `*/15 * * * *` UTC = due personal reminders and Classroom email check (about every 15 minutes)
 - `30 0-22/2 * * *` UTC = deadline check every two hours (06:00, 08:00, ..., 04:00 Asia/Kolkata)
 
 To change these times, edit the cron expressions in the workflow. GitHub Actions cron uses UTC.

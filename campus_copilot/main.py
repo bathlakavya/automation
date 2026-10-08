@@ -41,7 +41,7 @@ def main(argv=None):
     sub.add_parser("classroom", help="classroom brief only")
     sub.add_parser("jobs", help="job digest only")
     sub.add_parser("remind", help="cheap 24h deadline nudge (no LLM)")
-    sub.add_parser("telegram-poll", help="check Telegram messages and personal reminders")
+    sub.add_parser("scheduled-tick", help="deliver due Telegram reminders and check Classroom email")
     a = sub.add_parser("ask", help="coding / build help (local Ollama model)"); a.add_argument("question")
     s = sub.add_parser("study", help="notes | quiz | hints | plan")
     s.add_argument("mode", choices=["notes", "quiz", "hints", "plan"]); s.add_argument("text")
@@ -64,8 +64,8 @@ def main(argv=None):
         print(pipeline.jobs_section(cfg))
     elif args.cmd == "remind":
         print(pipeline.remind(cfg) or "Nothing due in 24h")
-    elif args.cmd == "telegram-poll":
-        print(json.dumps(pipeline.telegram_poll(cfg), indent=2))
+    elif args.cmd == "scheduled-tick":
+        print(json.dumps(pipeline.scheduled_tick(cfg), indent=2))
     elif args.cmd == "ask":
         print(llm.hermes(llm.load_prompt("coder"), args.question))
     elif args.cmd == "study":

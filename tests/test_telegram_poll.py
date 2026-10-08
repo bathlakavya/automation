@@ -1,35 +1,26 @@
 import os
 import unittest
 from unittest.mock import patch
-from zoneinfo import ZoneInfo
 
 from campus_copilot import pipeline
 
 
-class TelegramPollTests(unittest.TestCase):
+class ScheduledTickTests(unittest.TestCase):
     @patch.dict(os.environ, {"TELEGRAM_CHAT_ID": "42", "IMAP_USER": "", "IMAP_PASS": ""})
     @patch("campus_copilot.pipeline.store.due_reminders", return_value=[])
-    @patch("campus_copilot.pipeline.store.get_state", return_value="0")
-    @patch("campus_copilot.pipeline.notify.telegram_updates")
     @patch("campus_copilot.pipeline.notify.telegram_reply")
-    @patch("campus_copilot.pipeline.store.set_state")
-    @patch("campus_copilot.pipeline.personal.handle_message", return_value="Saved.")
-    def test_processes_only_configured_chat_and_advances_offset(
-            self, handle, set_state, reply, updates, _get_state, _due):
-        updates.return_value = [
-            {"update_id": 4, "message": {"chat": {"id": 42}, "text": "/help"}},
-            {"update_id": 5, "message": {"chat": {"id": 99}, "text": "private message"}},
-        ]
+    @patch("campus_copilot.pipeline.store.mark_reminder_sent")
+    def test_sends_due_reminders_without_polling_updates(self, mark_sent, reply, due):
+        due.return_value = [{"id": 7, "title": "Call Maya", "due_at": "2026-10-09T17:30:00+05:30"}]
 
-        result = pipeline.telegram_poll({"timezone": "Asia/Kolkata"})
+        result = pipeline.scheduled_tick({"timezone": "Asia/Kolkata"})
 
-        handle.assert_called_once_with(
-            "/help", 4, ZoneInfo("Asia/Kolkata"), now=unittest.mock.ANY)
-        reply.assert_called_once_with("42", "Saved.")
-        set_state.assert_any_call("telegram_update_offset", 5)
-        set_state.assert_any_call("telegram_update_offset", 6)
-        self.assertEqual(result["telegram_messages"], 2)
-        self.assertEqual(result["personal_reminders_sent"], 0)
+        reply.assert_called_once()
+        self.assertIn("Call Maya", reply.call_args.args[1])
+        self.assertIn("Fri 09 Oct, 05:30 PM", reply.call_args.args[1])
+        mark_sent.assert_called_once_with(7)
+        self.assertEqual(result["personal_reminders_sent"], 1)
+        self.assertEqual(result["classroom_emails_sent"], 0)
 
     @patch.dict(os.environ, {"IMAP_USER": "student@example.edu", "IMAP_PASS": "private"})
     @patch("campus_copilot.pipeline.store.get_state", return_value=None)
